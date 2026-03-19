@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "K8s: Attach debug-app (Node)",
+      "type": "node",
+      "request": "attach",
+      "address": "localhost",
+      "port": 9229,
+      "localRoot": "${workspaceFolder}/tools/k8s/sample-app",
+      "remoteRoot": "/app",
+      "preLaunchTask": "k8s: port-forward debug"
+    }
+  ]
+}

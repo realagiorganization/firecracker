@@ -1,0 +1,119 @@
+name: K8s Smoke (Compose -> Kompose)
+
+on:
+  pull_request:
+  push:
+    tags-ignore:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  k8s_deploy_smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k3d, kubectl, kompose
+        run: |
+          set -euxo pipefail
+          sudo curl -fsSL -o /usr/local/bin/k3d https://github.com/k3d-io/k3d/releases/download/v5.7.4/k3d-linux-amd64
+          sudo chmod +x /usr/local/bin/k3d
+          sudo curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/v1.30.6/bin/linux/amd64/kubectl
+          sudo chmod +x /usr/local/bin/kubectl
+          sudo curl -fsSL -o /usr/local/bin/kompose https://github.com/kubernetes/kompose/releases/download/v1.34.0/kompose-linux-amd64
+          sudo chmod +x /usr/local/bin/kompose
+
+      - name: Create k3d cluster
+        run: |
+          set -euxo pipefail
+          k3d cluster create fc-dev \
+            --image rancher/k3s:v1.30.6-k3s1 \
+            --servers 1 \
+            --agents 1 \
+            --port "8080:80@loadbalancer" \
+            --wait
+          kubectl cluster-info
+
+      - name: Build and import app image (branch version)
+        run: |
+          set -euxo pipefail
+          docker build -t firecracker-k8s-debug-app:${{ github.sha }} tools/k8s/sample-app
+          k3d image import -c fc-dev firecracker-k8s-debug-app:${{ github.sha }}
+
+      - name: Deploy from docker-compose.app.yml
+        run: |
+          set -euxo pipefail
+          mkdir -p k8s-out
+          kompose convert -f docker-compose.app.yml -o k8s-out
+          kubectl create namespace debug-app || true
+          kubectl -n debug-app apply -f k8s-out
+          kubectl -n debug-app set image deployment/debug-app debug-app=firecracker-k8s-debug-app:${{ github.sha }}
+          kubectl -n debug-app rollout status deployment/debug-app --timeout=180s
+
+      - name: Smoke test (/health)
+        run: |
+          set -euxo pipefail
+          kubectl -n debug-app port-forward svc/debug-app 3000:3000 >/tmp/port-forward.log 2>&1 &
+          pf_pid=$!
+          trap "kill $pf_pid || true" EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/health >/dev/null; then
+              echo "health OK"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "health check failed"
+          curl -v http://127.0.0.1:3000/health || true
+          exit 1
+
+      - name: Collect logs and intermediates
+        if: always()
+        run: |
+          set -euxo pipefail
+          kubectl get pods -A > kubectl_pods.txt || true
+          kubectl -n debug-app get all > debug_app_objects.txt || true
+          kubectl -n debug-app logs deploy/debug-app --tail=-1 > debug_app.log || true
+          tar -czf k8s_artifacts.tgz k8s-out /tmp/port-forward.log kubectl_pods.txt debug_app_objects.txt debug_app.log || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-smoke-${{ github.sha }}
+          path: k8s_artifacts.tgz
+          if-no-files-found: ignore
+
+  build_firecracker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Firecracker (release) using devtool
+        run: |
+          set -euxo pipefail
+          tools/devtool build --release 2>&1 | tee build_firecracker.log
+
+      - name: Package executables and logs
+        run: |
+          set -euxo pipefail
+          toolchain="$(uname -m)-unknown-linux-musl"
+          mkdir -p ci-out
+          cp -v build_firecracker.log ci-out/
+          cp -v build/cargo_target/${toolchain}/release/firecracker ci-out/
+          cp -v build/cargo_target/${toolchain}/release/jailer ci-out/
+          cp -v build/cargo_target/${toolchain}/release/seccompiler-bin ci-out/
+          cp -v build/cargo_target/${toolchain}/release/rebase-snap ci-out/
+          cp -v build/cargo_target/${toolchain}/release/cpu-template-helper ci-out/
+          cp -v build/cargo_target/${toolchain}/release/snapshot-editor ci-out/
+          tar -czf firecracker_build_${{ github.sha }}.tgz -C ci-out .
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firecracker-build-${{ github.sha }}
+          path: firecracker_build_${{ github.sha }}.tgz

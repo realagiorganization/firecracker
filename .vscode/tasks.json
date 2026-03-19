@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "k8s: deploy debug-app",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "tools/k8s/deploy_compose_to_k8s.sh",
+        "docker-compose.app.yml"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "k8s: port-forward http",
+      "type": "shell",
+      "command": "kubectl",
+      "args": [
+        "-n",
+        "debug-app",
+        "port-forward",
+        "svc/debug-app",
+        "3000:3000"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "k8s: port-forward debug",
+      "type": "shell",
+      "command": "kubectl",
+      "args": [
+        "-n",
+        "debug-app",
+        "port-forward",
+        "svc/debug-app",
+        "9229:9229"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

@@ -7,7 +7,10 @@ target
 .idea
 __pycache__
 *.pyc
-.vscode
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
 test_results/*
 tags
 *.core

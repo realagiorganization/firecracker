@@ -1,0 +1,22 @@
+{
+  "name": "firecracker-k8s-dev",
+  "build": {
+    "dockerfile": "../tools/k8s/dev/Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace",
+  "runArgs": [
+    "--network=host",
+    "-v",
+    "/var/run/docker.sock:/var/run/docker.sock"
+  ],
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}

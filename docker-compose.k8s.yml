@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: tools/k8s/dev/Dockerfile
+    volumes:
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: host
+    environment:
+      K3D_CLUSTER_NAME: fc-dev
+      K3D_SERVERS: "1"
+      K3D_AGENTS: "1"
+      K3D_K3S_IMAGE: rancher/k3s:v1.30.6-k3s1
+      K3D_PORT_HTTP: "8080:80@loadbalancer"
+    working_dir: /workspace
+    tty: true
+    stdin_open: true

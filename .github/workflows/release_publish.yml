@@ -1,0 +1,85 @@
+name: Release Publish (Binaries + Image)
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Build release artifacts (tools/devtool make_release)
+        run: |
+          set -euxo pipefail
+          tools/devtool make_release 2>&1 | tee release_build.log
+
+      - name: Prepare release tarball
+        run: |
+          set -euxo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          arch="$(uname -m)"
+          suffix="${tag}-${arch}"
+          release_dir="release-${suffix}"
+          test -d "${release_dir}"
+          tar -czf "${release_dir}.tar.gz" "${release_dir}"
+
+      - name: Prepare Docker image build context
+        run: |
+          set -euxo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          arch="$(uname -m)"
+          suffix="${tag}-${arch}"
+          release_dir="release-${suffix}"
+
+          rm -rf image_ctx
+          mkdir -p image_ctx
+          cp -v "${release_dir}/firecracker-${suffix}" image_ctx/firecracker
+          cp -v "${release_dir}/jailer-${suffix}" image_ctx/jailer
+          cp -v "${release_dir}/seccompiler-bin-${suffix}" image_ctx/seccompiler-bin
+          cp -v "${release_dir}/rebase-snap-${suffix}" image_ctx/rebase-snap
+          cp -v "${release_dir}/cpu-template-helper-${suffix}" image_ctx/cpu-template-helper
+          cp -v "${release_dir}/snapshot-editor-${suffix}" image_ctx/snapshot-editor
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          set -euxo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          image="ghcr.io/${{ github.repository }}/firecracker:${tag}"
+          docker build -t "$image" -f tools/k8s/firecracker-image/Dockerfile image_ctx
+          docker push "$image"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          arch="$(uname -m)"
+          release_dir="release-${tag}-${arch}"
+          gh release upload "$tag" "${release_dir}.tar.gz" release_build.log --clobber
+
+      - name: Upload logs and intermediates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-intermediates-${{ github.event.release.tag_name }}
+          path: |
+            release_build.log
+            release-*.tar.gz
+          if-no-files-found: ignore
